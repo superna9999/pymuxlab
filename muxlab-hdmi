@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+MuxLab HDMI/SDI Signal Analyser Management Library
+
+   Copyright 2018 BayLibre SAS
+   Author: Neil Armstrong <narmstrong@baylibre.com>
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+@author: Neil Armstrong <narmstrong@baylibre.com>
+"""
+
+from pymuxlab.pymuxlab import *
+import argparse
+import json
+
+def parse_cmdline(commands):
+    parser = argparse.ArgumentParser(description="MuxLab HDMI Analyser Tool",
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--version', '-v', action='version', version='%(prog)s 0.1')
+    parser.add_argument('--tty', dest='tty',  action='store', default="/dev/ttyUSB0",
+                        help="tty device to use (default /dev/ttyUSB0)")
+    parser.add_argument('--group', dest='groupAddr',  action='store', default=0,
+                        help="Group Address (default 0)")
+    parser.add_argument('--device', dest='deviceAddr',  action='store', default=0,
+                        help="Device Address (default 0)")
+    parser.add_argument('--baudrate', dest='baudrate',  action='store', default=115200,
+                        help="Baudrate (default 115200)")
+    parser.add_argument('--file', dest='file',  action='store', default="out.bin",
+                        help="File to save EDID or Picture")
+    parser.add_argument('--ratio', dest='ratio',  action='store', default=4,
+                        help="Image dump ratio (default 4)")
+    parser.add_argument('--edid', dest='edid',  action='store',
+                        help="EDID Slot to select (no default)")
+    parser.add_argument('command',  action='store', choices=commands, default="source-info",
+                        help="Command to run")
+
+    args = parser.parse_args()
+
+    return args
+
+mode_files = ["cea_modes.json", "dmt_modes.json", "est_modes.json"]
+
+def detectMode(timings):
+    hdisplay  = timings.hActive
+    hsync_end = (timings.hActive + timings.hsOffset + timings.hsWidth)
+    hsync_start = (timings.hActive + timings.hsOffset)
+    htotal = (timings.hActive + timings.hBlank)
+    vdisplay = (timings.vActive)
+    vsync_end = (timings.vActive + timings.vsOffset + timings.vsWidth)
+    vsync_start = (timings.vActive + timings.vsOffset)
+    vtotal = (timings.vActive + timings.vBlank)
+    vrefresh = ((timings.clock * 1000) / \
+            ((timings.vActive + timings.vBlank) * (timings.hActive + timings.hBlank)))
+
+    for modefile in mode_files:
+        with open("data/%s" % modefile)  as f:
+            data = json.load(f)
+            for mode in data:
+                if 'phsync' in data[mode].keys() and data[mode]['phsync']:
+                    phsync = True
+                else:
+                    phsync = False
+                if 'pvsync' in data[mode].keys() and data[mode]['pvsync']:
+                    pvsync = True
+                else:
+                    pvsync = False
+                if 'interlace' in data[mode].keys() and data[mode]['interlace']:
+                    interlace = True
+                else:
+                    interlace = False
+                if data[mode]['hdisplay'] == hdisplay and \
+                    data[mode]['hsync_end'] == hsync_end and \
+                    data[mode]['hsync_start'] == hsync_start and \
+                    data[mode]['htotal'] == htotal and \
+                    data[mode]['vdisplay'] == vdisplay and \
+                    data[mode]['vsync_end'] == vsync_end and \
+                    data[mode]['vsync_start'] == vsync_start and \
+                    data[mode]['vtotal'] == vtotal and \
+                    pvsync == timings.vsyncPosivite and \
+                    phsync == timings.hsyncPosivite and \
+                    interlace == timings.interlace and \
+                    data[mode]['clock'] >= timings.clock*0.90 and \
+                    data[mode]['clock'] <= timings.clock*1.10:
+                    if 'vrefresh' in data[mode].keys() and data[mode]['vrefresh'] > 0:
+                        vrefresh = data[mode]['vrefresh']
+                    else:
+                        vrefresh = (data[mode]['clock'] * 1000) / (data[mode]['vtotal'] * data[mode]['htotal'])
+                    return mode + " (%s@%dHz)" % (data[mode]['name'], vrefresh)
+
+    return "None"
+
+commands = ["system", "source", "edid", "avi-infoframe", "picture", "image", "standby-on", "standby-off", "volume-up", "volume-down", "change-edid"]
+
+if __name__ == '__main__':
+
+    args = parse_cmdline(commands)
+
+    dev = HDMIAnalyser(args.tty, args.groupAddr, args.deviceAddr)
+
+    if args.command == "system":
+        addr = dev.getAddr()
+        print("Device Address: %d:%d" % (addr[0], addr[1]))
+        version = dev.getVersion()
+        print("Version: %s.%d" % (int(version[0]), int(version[1])))
+        print("Volume Level %d" % dev.getVolumeLevel())
+        version = dev.getFirmwareInfo(HDMIAnalyser.COMPONENT_RELEASE)
+        print("Firmare Info Release: %s.%d" % (version[0], version[1]))
+        version = dev.getFirmwareInfo(HDMIAnalyser.COMPONENT_MAIN_MCU)
+        print("Firmare Info Main MCU: %s.%d" % (version[0], version[1]))
+        version = dev.getFirmwareInfo(HDMIAnalyser.COMPONENT_MAIN_FPGA)
+        print("Firmare Info Main FPGA: %s.%d" % (version[0], version[1]))
+        version = dev.getFirmwareInfo(HDMIAnalyser.COMPONENT_POWER_MNG_BOARD)
+        print("Firmare Info Power Management Board: %s.%d" % (version[0], version[1]))
+        print("External 5V Input:\n%s" % dev.getGetExternal5VInput())
+        print("Battery Voltage: %d" % dev.getBatteryVoltage())
+        print("Standby Status: %d (0=On, 1=Off)" % dev.getStandbyStatus())
+    elif args.command == "source":
+        status = dev.getSignalStatus()
+        print("Signal Status: %d (0=Invalid 1=Valid)" % status)
+        if status > 0:
+            print("Source Type: %d (0=HDMI, 1=SDI)" % dev.getSourceType())
+            print("Signal Info:\n%s" % dev.getSignalInfo())
+            timings = dev.getTimings()
+            print("Timings:\n%s" % timings)
+            print("Detected Mode: %s" % detectMode(timings))
+    elif args.command == "edid":
+        print("EDID Configuration: %d" % dev.getEDIDNumber())
+        edid = dev.getEDID(dev.getEDIDNumber())
+        with open(args.file, "wb") as f:
+            f.write(edid)
+        print("Current EDID written to %s" % args.file)
+    elif args.command == "avi-infoframe":
+        avi = dev.getSignalPackageInfo(HDMIAnalyser.SIGNAL_PACKAGE_INFO_INDEX_AVI)
+        with open(args.file, "wb") as f:
+            f.write(avi)
+        print("Current AVI InfoFrame written to %s" % args.file)
+    elif args.command == "picture":
+        if dev.getSignalStatus() < 1:
+            raise ValueError("Invalid input signal, cannot dump picture")
+        picture = dev.getPicture()
+        with open(args.file, "wb") as f:
+            f.write(picture)
+        print("Current Picture written to %s" % args.file)
+    elif args.command == "image":
+        if dev.getSignalStatus() < 1:
+            raise ValueError("Invalid input signal, cannot dump image")
+        timings = dev.getTimings()
+        with open(args.file, "wb") as f:
+            for x in range(0, timings.hActive, int(args.ratio)):
+                    for y in range(0, timings.vActive, int(args.ratio)):
+                        data = dev.getPixelRGB(x, y)
+                        f.write(data)
+        print("Current %dx%d Picture written to %s" % (timings.hActive/int(args.ratio), timings.vActive/int(args.ratio), args.file))
+    elif args.command == "standby-set-on":
+        dev.setStandbyStatus(1)
+        print("Standby Status: %d (0=On, 1=Off)" % dev.getStandbyStatus())
+    elif args.command == "standby-set-off":
+        dev.setStandbyStatus(0)
+        print("Standby Status: %d (0=On, 1=Off)" % dev.getStandbyStatus())
+    elif args.command == "volume-up":
+        volume = dev.getVolumeLevel()
+        if volume < 8:
+            dev.setVolumeLevel(volume + 1)
+        print("Volume: %d" % dev.getVolumeLevel())
+    elif args.command == "volume-down":
+        volume = dev.getVolumeLevel()
+        if volume > 0:
+            dev.setVolumeLevel(volume - 1)
+        print("Volume: %d" % dev.getVolumeLevel())
+    elif args.command == "change-edid":
+        edid = dev.getEDIDNumber()
+        if args.edid is None:
+            raise ValueError("Please pass --edid option")
+        print("Current EDID Slot: %d" % edid)
+        if edid != int(args.edid):
+            dev.setEDIDNumber(int(args.edid))
+            print("New EDID Slot: %s" % args.edid)
+    else:
+        print("Invalid Command")

@@ -1,0 +1,7 @@
+TODO List :
+- Use AVI infoframe to detect the current VIC
+- Fix Image and RGB pixels dump
+- Fix mode detection with in YUV420
+- Add support for EDID upload
+- Add support for monitoring
+- Fix support for "Ext 5v Input" data
