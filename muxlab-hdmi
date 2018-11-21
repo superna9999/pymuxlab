@@ -52,7 +52,8 @@ def parse_cmdline(commands):
 
 mode_files = ["cea_modes.json", "dmt_modes.json", "est_modes.json"]
 
-def detectMode(timings):
+def detectMode(timings, signalInfo):
+    vclk = timings.clock
     hdisplay  = timings.hActive
     hsync_end = (timings.hActive + timings.hsOffset + timings.hsWidth)
     hsync_start = (timings.hActive + timings.hsOffset)
@@ -63,6 +64,13 @@ def detectMode(timings):
     vtotal = (timings.vActive + timings.vBlank)
     vrefresh = ((timings.clock * 1000) / \
             ((timings.vActive + timings.vBlank) * (timings.hActive + timings.hBlank)))
+
+    if signalInfo.colorSpace == HDMISignalInfo.YUV420:
+        hdisplay = hdisplay * 2
+        hsync_end = hsync_end * 2
+        hsync_start = hsync_start * 2
+        htotal = htotal * 2
+        vclk = timings.clock * 2
 
     for modefile in mode_files:
         with open("data/%s" % modefile)  as f:
@@ -91,15 +99,13 @@ def detectMode(timings):
                     pvsync == timings.vsyncPosivite and \
                     phsync == timings.hsyncPosivite and \
                     interlace == timings.interlace and \
-                    data[mode]['clock'] >= timings.clock*0.90 and \
-                    data[mode]['clock'] <= timings.clock*1.10:
+                    data[mode]['clock'] >= vclk*0.90 and \
+                    data[mode]['clock'] <= vclk*1.10:
                     if 'vrefresh' in data[mode].keys() and data[mode]['vrefresh'] > 0:
                         vrefresh = data[mode]['vrefresh']
-                    else:
-                        vrefresh = (data[mode]['clock'] * 1000) / (data[mode]['vtotal'] * data[mode]['htotal'])
                     return mode + " (%s@%dHz)" % (data[mode]['name'], vrefresh)
 
-    return "None"
+    return "Unknown (%dx%d@%dHz)" % (hdisplay, vdisplay, vrefresh)
 
 commands = ["system", "source", "edid", "avi-infoframe", "picture", "image", "standby-on", "standby-off", "volume-up", "volume-down", "change-edid"]
 
@@ -130,11 +136,12 @@ if __name__ == '__main__':
         status = dev.getSignalStatus()
         print("Signal Status: %d (0=Invalid 1=Valid)" % status)
         if status > 0:
+            signalInfo = dev.getSignalInfo()
             print("Source Type: %d (0=HDMI, 1=SDI)" % dev.getSourceType())
             print("Signal Info:\n%s" % dev.getSignalInfo())
             timings = dev.getTimings()
             print("Timings:\n%s" % timings)
-            print("Detected Mode: %s" % detectMode(timings))
+            print("Detected Mode: %s" % detectMode(timings, signalInfo))
     elif args.command == "edid":
         print("EDID Configuration: %d" % dev.getEDIDNumber())
         edid = dev.getEDID(dev.getEDIDNumber())
